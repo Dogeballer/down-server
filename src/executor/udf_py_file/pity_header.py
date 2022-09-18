@@ -6,7 +6,7 @@ import hashlib
 
 
 def pity_header(userName, userPwd):
-    url = 'http://121.5.2.74:7777'
+    url = 'http://121.5.2.74'
     headers = {
         "Content-Type": "application/json; charset=UTF-8"
     }

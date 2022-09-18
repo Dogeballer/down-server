@@ -5,7 +5,7 @@ from rest_framework_simplejwt.serializers import TokenObtainSerializer
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 
-from system_settings.models import DataSource, Udf, UdfArgs
+from system_settings.models import DataSource, Udf, UdfArgs, MQTTClient
 
 
 class ConsumerTokenSerializer(TokenObtainSerializer):
@@ -59,3 +59,9 @@ class UdfOnlineDebugSerializer(serializers.Serializer):
 
     def update(self, instance, validated_data):
         pass
+
+
+class MQTTClientSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MQTTClient
+        fields = "__all__"

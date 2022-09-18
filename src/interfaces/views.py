@@ -312,8 +312,11 @@ class InterfaceTestApi(generics.GenericAPIView):
                 authentication_environment = environment.authentication_environment
                 interface = Interface.objects.get(pk=serializer_class.data.get('interfaceId'))
                 params = serializer_class.data.get('params')
-                body = json.dumps(serializer_class.data.get('body'))
-            except:
+                body = serializer_class.data.get('body')
+                if body:
+                    body = json.loads(body)
+            except Exception as e:
+                print(e)
                 response.code = 3000
                 response.msg = '参数传入错误，请检查参数'
                 return JsonResponse(response.get_dic, safe=False)

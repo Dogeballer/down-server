@@ -53,14 +53,14 @@ class CaseStepsCreateSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         param = json.dumps(validated_data.get('param', []))
-        body = json.dumps(validated_data.get('body', {}))
+        body = validated_data.get('body', '')
         validated_data['param'] = param
         validated_data['body'] = body
         case_step = CaseSteps.objects.create(**validated_data)
         if case_step.type in [0, 2, 3]:
             case_assert = CaseAssert.objects.create(name='返回码校验', type_from=1, assert_type=2, verify_value=200,
                                                     case_step=case_step)
-        elif case_step.type in [4, 5, 6, 8, 9]:
+        elif case_step.type in [4, 5, 6, 8, 9, 10, 11, 12]:
             case_assert = CaseAssert.objects.create(name='是否成功', type_from=0, value_statement='$.code', assert_type=2,
                                                     verify_value=0, case_step=case_step)
         return case_step
@@ -78,7 +78,9 @@ class CaseStepsCreateSerializer(serializers.ModelSerializer):
         instance.data_source = validated_data.get('data_source', instance.data_source)
         instance.sql_script = validated_data.get('sql_script', instance.sql_script)
         instance.param = json.dumps(validated_data.get('param', instance.param))
-        instance.body = json.dumps(validated_data.get('body', instance.body))
+        instance.body = validated_data.get('body', instance.body)
+        instance.topic = validated_data.get('topic', instance.topic)
+        instance.qos = validated_data.get('qos', instance.qos)
         instance.save()
         return instance
 
@@ -220,3 +222,28 @@ class SqlScriptExecuteSerializer(serializers.Serializer):
     use_case_id = serializers.IntegerField()
     step_type = serializers.IntegerField()
     sql_script = serializers.CharField()
+
+
+class MqttPublishSerializer(serializers.Serializer):
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    mqtt_id = serializers.IntegerField(required=False)
+    topic = serializers.CharField()
+    qos = serializers.IntegerField()
+    payload = serializers.CharField()
+
+
+class MqttSubSerializer(serializers.Serializer):
+    def update(self, instance, validated_data):
+        pass
+
+    def create(self, validated_data):
+        pass
+
+    mqtt_id = serializers.IntegerField(required=False)
+    topic = serializers.CharField()
+    qos = serializers.IntegerField()

@@ -89,3 +89,26 @@ class UdfArgs(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class MQTTClient(models.Model):
+    """
+    mqtt客户端管理
+    """
+    name = models.CharField(max_length=50, null=False, verbose_name="客户端名称")
+    broker = models.CharField(max_length=50, null=False, verbose_name="broker", default='')
+    port = models.IntegerField(null=False, verbose_name="port", default=0)
+    username = models.CharField(max_length=50, null=False, verbose_name="username", default='')
+    password = models.CharField(max_length=50, null=False, blank=True, verbose_name="password", default='')
+    describe = models.TextField(default="", null=True, blank=True, verbose_name="客户端备注")
+    status = models.BooleanField(default=1, verbose_name="状态")
+    delete = models.BooleanField(verbose_name="是否删除", default=False)
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="添加时间")
+    update_time = models.DateTimeField(auto_now=True, blank=True, null=True, verbose_name="修改时间")
+
+    class Meta:
+        verbose_name = 'mqtt客户端管理'
+        verbose_name_plural = 'mqtt客户端管理'
+
+    def __str__(self):
+        return self.name + self.broker

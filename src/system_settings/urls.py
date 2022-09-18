@@ -22,4 +22,11 @@ urlpatterns = [
     path('udf/udfArgs/create', views.UdfArgsCreate.as_view()),
     path('udf/udfArgs/update/<int:pk>', views.UdfArgsUpdate.as_view()),
     path('udf/udfArgs/delete/<int:pk>', views.UdfArgsDelete.as_view()),
+    path('mqttClient/list', views.MQTTClientList.as_view()),
+    path('mqttClient/create', views.MQTTClientCreate.as_view()),
+    path('mqttClient/get/<int:pk>', views.MQTTClientDetail.as_view()),
+    path('mqttClient/update/<int:pk>', views.MQTTClientUpdate.as_view()),
+    path('mqttClient/delete/<int:pk>', views.MQTTClientDelete.as_view()),
+    path('mqttClient/mqttClientTest', views.MQTTClientTest.as_view()),
+    path('mqttClient/updateStatus/<int:pk>', views.UpdateMQTTClientStatus.as_view()),
 ]

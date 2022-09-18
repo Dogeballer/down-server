@@ -1,7 +1,7 @@
 from django.db import models
 from interfaces.models import Interface
 from projects.models import Modules
-from system_settings.models import DataSource, Udf
+from system_settings.models import DataSource, Udf, MQTTClient
 
 
 # Create your models here.
@@ -55,6 +55,9 @@ class CaseSteps(models.Model):
         # (7, 'SQL轮询执行'),
         (8, 'SQL查询列表循环'),
         (9, 'SQL执行列表循环'),
+        (10, 'MQTT推送'),
+        (11, 'MQTT订阅'),
+        (12, 'MQTT推送列表循环'),
     )
     name = models.CharField(max_length=50, verbose_name="步骤名称")
     use_case = models.ForeignKey(UseCases, related_name='use_case', on_delete=models.CASCADE, verbose_name="用例")
@@ -62,9 +65,13 @@ class CaseSteps(models.Model):
                                        verbose_name="对应接口")
     data_source = models.ForeignKey(DataSource, related_name='step_data_source', null=True, on_delete=models.CASCADE,
                                     verbose_name="执行对应元数据")
-    param = models.TextField(verbose_name="消息参数存储", default='', null=True)
-    body = models.TextField(verbose_name="消息体存储", default='', null=True)
-    sql_script = models.TextField(verbose_name="sql脚本", default='', null=True, blank=True)
+    mqtt = models.ForeignKey(MQTTClient, related_name='step_mqtt', null=True, on_delete=models.CASCADE,
+                             verbose_name="步骤对应MQTT")
+    topic = models.CharField(max_length=100, verbose_name="mqtt主题", default="", null=True, blank=True)
+    qos = models.IntegerField(verbose_name="排序", default=0)
+    param = models.TextField(verbose_name="消息参数存储", default="", null=True)
+    body = models.TextField(verbose_name="消息体存储", default="", null=True)
+    sql_script = models.TextField(verbose_name="sql脚本", default="", null=True, blank=True)
     type = models.IntegerField(choices=step_type, null=False, verbose_name="用例类型")
     sort = models.IntegerField(null=False, verbose_name="排序")
     status = models.BooleanField(default=1, verbose_name="步骤状态")

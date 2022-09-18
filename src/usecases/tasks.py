@@ -1,24 +1,23 @@
 from __future__ import absolute_import, unicode_literals
 
-from datetime import datetime
+import ast
+import json
+import time
 
+import jsonpath
 import requests
 from celery import shared_task
+from celery.utils.log import get_task_logger
 from django.db.models import Q
 from django.utils import timezone
-from django_celery_beat.models import *
-from down.celery import app
-from celery.utils.log import get_task_logger
-import json
-import jsonpath
-import time
+
 from executor.UseCaseExecutor import test_interfaces, assert_func, requests_func, dispose_params, instantiation_time
+from executor.mqtt_publish_client import MQTTPublishClient
 from executor.script_execution import udf_execute
 from executor.sql_executor import SqlExecutor
 from projects.models import *
 from system_settings.models import UdfArgs
 from usecases.models import *
-import ast
 
 logger = get_task_logger(__name__)
 
@@ -150,7 +149,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
             continue
         # 类型为接口或是轮询接口
         if case_step.type == 0 or case_step.type == 2:
-            method, query_param, headers, test_param, request_body, url, query_url, interface_callback_params = request_execute_prepare(
+            method, query_param, headers, test_param, body, request_body, url, query_url, interface_callback_params = request_execute_prepare(
                 case_step,
                 environment,
                 suite_global_params,
@@ -159,7 +158,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                 # global_params_dict["{{token}}"],
                 public_headers)
             case_step_log = CaseStepLog.objects.create(request_url=query_url, method=method, param=test_param,
-                                                       body=request_body,
+                                                       body=body,
                                                        case_log=case_log, case_step=case_step)
             if case_step.type == 0:
                 msg, response_code, response_headers, response_body, response_time = requests_func(method,
@@ -221,7 +220,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                 try:
                     # 循环回调列表参数
                     for item in loop_list:
-                        method, query_param, headers, test_param, request_body, url, query_url, interface_callback_params = request_execute_prepare(
+                        method, query_param, headers, test_param, body, request_body, url, query_url, interface_callback_params = request_execute_prepare(
                             case_step, environment, suite_global_params, global_params_dict,
                             use_case_callback_params_dict,
                             # global_params_dict["{{token}}"],
@@ -235,7 +234,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                                                                                            request_body)
                         case_step_log = CaseStepLog.objects.create(request_url=query_url, method=method,
                                                                    param=test_param,
-                                                                   body=request_body,
+                                                                   body=body,
                                                                    case_log=case_log, case_step=case_step)
                         step_postposition_deal(case_step,
                                                use_case_callback_params_dict, suite_global_params, global_params_dict,
@@ -384,6 +383,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                             try:
                                 # 循环回调列表参数
                                 for item in loop_list:
+                                    replace_sql = sql_script
                                     if len(keys) != 0:
                                         for key in keys:
                                             key_name = key.key_name
@@ -392,10 +392,10 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                                 value = item[key]
                                             except:
                                                 value = ''
-                                            sql_script = sql_script.replace(key_name, str(value))
+                                            replace_sql = replace_sql.replace(key_name, str(value))
                                     else:
-                                        sql_script = sql_script.replace(str(loop_parameter) + '.item', str(item))
-                                    execute_sql_script = sql_script
+                                        replace_sql = replace_sql.replace(str(loop_parameter) + '.item', str(item))
+                                    execute_sql_script = replace_sql
                                     case_step_log = CaseStepLog.objects.create(request_url=connect_info, method=method,
                                                                                param=[],
                                                                                body=[], sql_script=execute_sql_script,
@@ -438,6 +438,130 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                                                        step_body=json.dumps(body), assert_result=[])
                         # 关闭数据库链接（很关键）
                         cur.connection.close()
+        elif case_step.type == 10:
+            method = '推送'
+            mqtt = case_step.mqtt
+            topic = case_step.topic
+            qos = case_step.qos
+            body = case_step.body
+            topic = dispose_params(suite_global_params, topic)
+            topic = dispose_params(global_params_dict, topic)
+            topic = dispose_params(use_case_callback_params_dict, topic)
+            body = dispose_params(suite_global_params, body)
+            body = dispose_params(global_params_dict, body)
+            body = dispose_params(use_case_callback_params_dict, body)
+            callback_params = StepCallBackParams.objects.filter(step=case_step, delete=False)
+            if not mqtt:
+                case_step_log = CaseStepLog.objects.create(request_url='--', method=method, param=[],
+                                                           body=body,
+                                                           case_log=case_log, case_step=case_step, execute_status=0,
+                                                           step_body=json.dumps(
+                                                               [{"code": 3000, "message": "未配置MQTT客户端"}]),
+                                                           assert_result=[])
+                continue
+            mqtt_client = MQTTPublishClient(mqtt.broker, mqtt.port, mqtt.username, mqtt.password)
+            connect_info = f"{mqtt.broker}:{str(mqtt.port)}/topic--{topic}/qos=={qos}"
+            status, msg = mqtt_client.publish_msg(topic, payload, qos)
+            if status:
+                response_code = 200
+                step_body = {"code": 0, "message": msg}
+            else:
+                response_code = 500
+                step_body = {"code": 3000, "message": msg}
+            case_step_log = CaseStepLog.objects.create(request_url=connect_info, method=method, param=[],
+                                                       body=body, step_body=json.dumps(step_body),
+                                                       case_log=case_log, case_step=case_step)
+            step_postposition_deal(case_step,
+                                   use_case_callback_params_dict, suite_global_params, global_params_dict,
+                                   callback_params, step_body, response_code, start_time,
+                                   case_log, case_step_log)
+
+        elif case_step.type == 12:
+            method = '推送'
+            mqtt = case_step.mqtt
+            topic = case_step.topic
+            qos = case_step.qos
+            body = case_step.body
+            topic = dispose_params(suite_global_params, topic)
+            topic = dispose_params(global_params_dict, topic)
+            topic = dispose_params(use_case_callback_params_dict, topic)
+            body = dispose_params(suite_global_params, body)
+            body = dispose_params(global_params_dict, body)
+            body = dispose_params(use_case_callback_params_dict, body)
+            callback_params = StepCallBackParams.objects.filter(step=case_step, delete=False)
+            loop_parameter = case_step.loop_parameter
+            loop_list = use_case_callback_params_dict[loop_parameter]
+            keys = StepCircularKey.objects.filter(case_step=case_step, delete=False)
+            if not mqtt:
+                case_step_log = CaseStepLog.objects.create(request_url='--', method=method, param=[],
+                                                           body=body,
+                                                           case_log=case_log, case_step=case_step, execute_status=0,
+                                                           step_body=json.dumps(
+                                                               [{"code": 3000, "message": "未配置MQTT客户端"}]),
+                                                           assert_result=[])
+                continue
+            mqtt_client = MQTTPublishClient(mqtt.broker, mqtt.port, mqtt.username, mqtt.password)
+            if str(type(loop_list)) == "<class 'list'>" and len(loop_list) != 0:
+                try:
+                    # 循环回调列表参数
+                    for item in loop_list:
+                        replace_body = body
+                        replace_topic = topic
+                        if len(keys) != 0:
+                            for key in keys:
+                                key_name = key.key_name
+                                key = key.key
+                                try:
+                                    value = item[key]
+                                except:
+                                    value = ''
+                                replace_body = replace_body.replace(key_name, str(value))
+                                replace_topic = replace_topic.replace(key_name, str(value))
+                        else:
+                            replace_body = replace_body.replace(str(loop_parameter) + '.item', str(item))
+                            replace_topic = replace_topic.replace(str(loop_parameter) + '.item', str(item))
+                        execute_body = replace_body
+                        execute_topic = replace_topic
+                        status, msg = mqtt_client.publish_msg(execute_topic, execute_body, qos)
+                        if status:
+                            response_code = 200
+                            step_body = {"code": 0, "message": msg}
+                        else:
+                            response_code = 500
+                            step_body = {"code": 3000, "message": msg}
+                        connect_info = f'{mqtt.broker}:{str(mqtt.port)}/topic=="{replace_topic}"/qos=={qos}'
+                        case_step_log = CaseStepLog.objects.create(request_url=connect_info, method=method,
+                                                                   param=[],
+                                                                   body=execute_body,
+                                                                   step_body=json.dumps(step_body),
+                                                                   case_log=case_log, case_step=case_step)
+                        step_postposition_deal(case_step,
+                                               use_case_callback_params_dict, suite_global_params,
+                                               global_params_dict,
+                                               callback_params, step_body, response_code, start_time,
+                                               case_log, case_step_log)
+                except Exception as e:
+                    print(e)
+                    case_step_log = CaseStepLog.objects.create(request_url=connect_info, method=method,
+                                                               param=[],
+                                                               body=body,
+                                                               case_log=case_log, case_step=case_step,
+                                                               execute_status=0,
+                                                               step_body=json.dumps(
+                                                                   [{"code": 3000,
+                                                                     "message": "取值异常,请检查参数"}]),
+                                                               assert_result=[])
+            else:
+                execute_status = 0
+                body = [{"code": 3000, "message": "取值异常,请检查参数"}]
+                if len(loop_list) == 0:
+                    execute_status = 1
+                    body = [{"code": 0, "message": "列表长度为0"}]
+                case_step_log = CaseStepLog.objects.create(request_url=connect_info, method=method,
+                                                           param=[], body=body,
+                                                           case_log=case_log, case_step=case_step,
+                                                           execute_status=execute_status,
+                                                           step_body=json.dumps(body), assert_result=[])
     count_step_log = CaseStepLog.objects.filter(case_log=case_log).count()
     count_failed_step = CaseStepLog.objects.filter(~Q(execute_status=1), case_log=case_log).count()
     count_success_step = count_step_log - count_failed_step
@@ -545,8 +669,11 @@ def request_execute_prepare(case_step, environment, suite_global_params, global_
             headers[param['name']] = param['value']
             test_param.append(param)
     # 组装所有参数
-    request_body = json.loads(body)
-    request_body = json.dumps(request_body)
+    if body:
+        request_body = json.loads(body)
+        request_body = json.dumps(request_body)
+    else:
+        request_body = []
     test_param = json.dumps(test_param)
     # 生成url值
     for path_param in path_param_list:
@@ -558,7 +685,7 @@ def request_execute_prepare(case_step, environment, suite_global_params, global_
         query_url = url + url_query_param
     else:
         query_url = url
-    return method, query_param, headers, test_param, request_body, url, query_url, interface_callback_params
+    return method, query_param, headers, test_param, body, request_body, url, query_url, interface_callback_params
 
 
 def assert_execute(item, suite_global_params, global_params_dict, use_case_callback_params_dict, response_body,

@@ -7,12 +7,14 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 
 from down.CommonStandards import StandardDeleteAPI, ResponseStandard, StandardListAPI, StandardCreateAPI, \
     StandardRetrieveAPI, StandardUpdateAPI, StandardPagination
+from executor.mqtt_client import MQTTClientClass
+from executor.mqtt_publish_client import MQTTPublishClient
 from executor.script_execution import DebugCode
 from executor.sql_executor import SqlExecutor
-from system_settings.filter import UdfFilter, DataSourceFilter, UdfArgsFilter
-from system_settings.models import UdfArgs, DataSource, Udf
+from system_settings.filter import UdfFilter, DataSourceFilter, UdfArgsFilter, MQTTClientFilter
+from system_settings.models import UdfArgs, DataSource, Udf, MQTTClient
 from system_settings.serializers import UdfSerializer, DataSourceSerializer, UdfOnlineDebugSerializer, \
-    UdfArgsSerializer, ConsumerTokenSerializer
+    UdfArgsSerializer, ConsumerTokenSerializer, MQTTClientSerializer
 from rest_framework.response import Response
 from rest_framework import viewsets, generics, filters, permissions, status, serializers
 from django.db.models import Q
@@ -372,3 +374,75 @@ def expression_conversion(udf):
     else:
         expression = "${%s()}" % udf.name
     return expression
+
+
+class MQTTClientList(StandardListAPI):
+    queryset = MQTTClient.objects.filter(delete=False)
+    serializer_class = MQTTClientSerializer
+    filter_backends = (DjangoFilterBackend, filters.OrderingFilter)
+    filterset_class = MQTTClientFilter
+    permission_classes = (IsAuthenticated,)
+
+
+class MQTTClientCreate(StandardCreateAPI):
+    queryset = MQTTClient.objects.all()
+    serializer_class = MQTTClientSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class MQTTClientDetail(StandardRetrieveAPI):
+    queryset = MQTTClient.objects.all()
+    serializer_class = MQTTClientSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class MQTTClientUpdate(StandardUpdateAPI):
+    queryset = MQTTClient.objects.all()
+    serializer_class = MQTTClientSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class UpdateMQTTClientStatus(generics.UpdateAPIView):
+    queryset = MQTTClient.objects.all()
+    serializer_class = MQTTClientSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def update(self, request, *args, **kwargs):
+        mqtt_client = self.get_object()
+        mqtt_client.status = not mqtt_client.status
+        mqtt_client.save()
+        response = ResponseStandard()
+        return Response(response.get_dic)
+
+
+class MQTTClientDelete(StandardDeleteAPI):
+    queryset = MQTTClient.objects.all()
+    serializer_class = MQTTClientSerializer
+    permission_classes = (IsAuthenticated,)
+
+
+class MQTTClientTest(StandardCreateAPI):
+    queryset = MQTTClient.objects.all()
+    serializer_class = MQTTClientSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def create(self, request, *args, **kwargs):
+        response = ResponseStandard()
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            broker = serializer.data.get('broker')
+            port = serializer.data.get('port')
+            username = serializer.data.get('username')
+            password = serializer.data.get('password')
+            mqtt_client = MQTTPublishClient(broker, port, username, password)
+            status, error_msg = mqtt_client.publish_msg('/python/mqtt', 'test', 0)
+            if not status:
+                print(error_msg)
+                response.code = 3000
+                response.msg = error_msg.replace("推送", "连接")
+            else:
+                response.msg = '连接成功'
+        else:
+            response.code = 3000
+            response.msg = str(serializer.errors).replace('{', '').replace('}', '')
+        return JsonResponse(response.get_dic)

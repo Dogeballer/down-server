@@ -53,4 +53,6 @@ urlpatterns = [
     path('stepCallBackParams', views.StepCallBackParamsCreateList.as_view()),
     path('stepCallBackParams/<int:pk>', views.StepCallBackParamsDetail.as_view()),
     path('sqlScriptExecute', views.SqlScriptExecute.as_view()),
+    path('mqttPublish', views.MqttPublish.as_view()),
+    path('mqttSub', views.MqttSub.as_view()),
 ]

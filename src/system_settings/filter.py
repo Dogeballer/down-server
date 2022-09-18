@@ -1,6 +1,6 @@
 from django_filters import rest_framework as filters
 from django.db.models import Q
-from .models import DataSource, Udf, UdfArgs
+from .models import DataSource, Udf, UdfArgs, MQTTClient
 
 
 class DataSourceFilter(filters.FilterSet):
@@ -13,6 +13,16 @@ class DataSourceFilter(filters.FilterSet):
     class Meta:
         model = DataSource
         fields = ['name', 'database_type', 'host', 'database', 'status']
+
+
+class MQTTClientFilter(filters.FilterSet):
+    name = filters.CharFilter(field_name='name', lookup_expr='icontains')
+    broker = filters.CharFilter(field_name='broker', lookup_expr='icontains')
+    status = filters.BooleanFilter(field_name='status')
+
+    class Meta:
+        model = MQTTClient
+        fields = ['name', 'broker', 'status']
 
 
 class UdfFilter(filters.FilterSet):

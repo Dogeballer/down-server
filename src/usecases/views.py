@@ -1,3 +1,6 @@
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 from django.db.models import Count, Max
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.permissions import IsAuthenticated
@@ -6,9 +9,11 @@ from down.CommonStandards import *
 from executor.UseCaseExecutor import use_case_executor, instantiation_time
 from executor.getUacToken import GetToken
 from executor.get_auth_header import GetAuthHeader
+from executor.mqtt_publish_client import MQTTPublishClient
 from executor.sql_executor import SqlExecutor
 from interfaces.models import *
 from interfaces.views import merge_dicts
+from system_settings.models import MQTTClient
 from .filter import *
 from .serializers import *
 from rest_framework import viewsets, generics, filters, permissions
@@ -417,10 +422,6 @@ class CaseStepsList(StandardListAPI):
                 param = data['param']
                 body = data['body']
                 try:
-                    data['body'] = json.loads(body)
-                except:
-                    data['body'] = {}
-                try:
                     data['param'] = json.loads(param)
                 except:
                     data['param'] = {}
@@ -730,11 +731,11 @@ class UseCaseAsyncExecute(generics.GenericAPIView):
             taskLog = TaskLog.objects.create(name=name, executor=executor, execute_status=2, mode=mode, tags="手动执行",
                                              execute_type=execute_type, success_count=0, failed_count=0)
             for use_case_id in use_case_id_list:
-                async_execute_use_case.delay(use_case_id=use_case_id, taskLog_id=taskLog.id,
-                                             environment_id=environment_id,
-                                             suite_global_params={}, public_headers=header_dict,
-                                             case_count=case_count,
-                                             payload={})
+                async_execute_use_case(use_case_id=use_case_id, taskLog_id=taskLog.id,
+                                       environment_id=environment_id,
+                                       suite_global_params={}, public_headers=header_dict,
+                                       case_count=case_count,
+                                       payload={})
                 # async_execute_use_case(use_case_id=use_case_id, taskLog_id=taskLog.id,
                 #                        environment_id=environment_id,
                 #                        token=token, suite_global_params={}, public_headers={},
@@ -1114,10 +1115,6 @@ class StepLogList(StandardListAPI):
                 poll_assert_result = data['poll_assert_result']
                 query_field = data['query_field']
                 try:
-                    data['body'] = json.loads(body)
-                except:
-                    data['body'] = {}
-                try:
                     data['param'] = json.loads(param)
                 except:
                     data['param'] = {}
@@ -1394,6 +1391,127 @@ class SqlScriptExecute(generics.GenericAPIView):
                     response.data['response_body'] = query_data
                     response.data['response_time'] = str(used_time) + 'ms'
                     return JsonResponse(response.get_dic, safe=False)
+        else:
+            response.code = 3000
+            response.msg = '操作失败' + str(serializer_class.errors)
+            return JsonResponse(response.get_dic, safe=False)
+
+
+class MqttPublish(generics.GenericAPIView):
+    serializer_class = MqttPublishSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        response = ResponseStandard()
+        serializer_class = self.serializer_class(data=request.data)
+        if serializer_class.is_valid():
+            mqtt_id = serializer_class.validated_data.get('mqtt_id', '')
+            topic = serializer_class.validated_data.get('topic', '')
+            qos = serializer_class.validated_data.get('qos', '')
+            payload = serializer_class.validated_data.get('payload', '')
+            try:
+                mqtt = MQTTClient.objects.get(pk=mqtt_id)
+            except:
+                response.code = 3000
+                response.msg = '参数传入错误，请检查参数'
+                return JsonResponse(response.get_dic, safe=False)
+            if not mqtt:
+                response.code = 3000
+                response.msg = '请选择要执行的客户端！'
+                return JsonResponse(response.get_dic, safe=False)
+            start_time = datetime.now()
+            mqtt_client = MQTTPublishClient(mqtt.broker, mqtt.port, mqtt.username, mqtt.password)
+            status, msg = mqtt_client.publish_msg(topic, payload, qos)
+            end_time = datetime.now()
+            used_time = round((end_time - start_time).total_seconds() * 1000, 2)
+            if not status:
+                response.data['response_code'] = 500
+                response.data['response_time'] = str(used_time) + 'ms'
+                response_body = {
+                    "code": 3000,
+                    "msg": msg
+                }
+                response.data['response_body'] = response_body
+                response.msg = msg
+            else:
+                response.data['response_code'] = 200
+                response.data['response_time'] = str(used_time) + 'ms'
+                response_body = {
+                    "code": 0,
+                    "msg": msg
+                }
+                response.data['response_body'] = response_body
+                response.msg = msg
+            return JsonResponse(response.get_dic, safe=False)
+        else:
+            response.code = 3000
+            response.msg = '操作失败' + str(serializer_class.errors)
+            return JsonResponse(response.get_dic, safe=False)
+
+
+class MqttSub(generics.GenericAPIView):
+    serializer_class = MqttSubSerializer
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request):
+        response = ResponseStandard()
+        serializer_class = self.serializer_class(data=request.data)
+        if serializer_class.is_valid():
+            mqtt_id = serializer_class.validated_data.get('mqtt_id', '')
+            topic = serializer_class.validated_data.get('topic', '')
+            qos = serializer_class.validated_data.get('qos', '')
+            try:
+                mqtt = MQTTClient.objects.get(pk=mqtt_id)
+            except:
+                response.code = 3000
+                response.msg = '参数传入错误，请检查参数'
+                return JsonResponse(response.get_dic, safe=False)
+            if not mqtt:
+                response.code = 3000
+                response.msg = '请选择要执行的客户端！'
+                return JsonResponse(response.get_dic, safe=False)
+            start_time = datetime.now()
+            mqtt_client = MQTTPublishClient(mqtt.broker, mqtt.port, mqtt.username, mqtt.password)
+            pool = ThreadPoolExecutor(max_workers=15)
+            task = pool.submit(mqtt_client.sub_msg, topic, qos)
+            wait_time = 10
+            while True:
+                time.sleep(1)
+                if task.done():
+                    break
+                else:
+                    wait_time -= 1
+                if wait_time == 0:
+                    mqtt_client.publish_msg(topic, "订阅等待超时", qos)
+                    time.sleep(0.5)
+                    break
+            end_time = datetime.now()
+            used_time = round((end_time - start_time).total_seconds() * 1000, 2)
+            status, msg = task.result()
+            if not status or msg == "订阅等待超时":
+                response.data['response_code'] = 500
+                response.data['response_time'] = str(used_time) + 'ms'
+                response_body = {
+                    "code": 3000,
+                    "msg": msg
+                }
+                response.data['response_body'] = response_body
+                response.msg = msg
+            else:
+                response.data['response_code'] = 200
+                response.data['response_time'] = str(used_time) + 'ms'
+                try:
+                    msg = json.loads(msg)
+                except:
+                    pass
+                response_body = {
+                    "code": 0,
+                    "data": msg,
+                    "msg": "订阅接收成功"
+                }
+                response.data['response_body'] = response_body
+                response.msg = msg
+            return JsonResponse(response.get_dic, safe=False)
         else:
             response.code = 3000
             response.msg = '操作失败' + str(serializer_class.errors)

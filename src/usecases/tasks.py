@@ -10,6 +10,7 @@ from celery import shared_task
 from celery.utils.log import get_task_logger
 from django.db.models import Q
 from django.utils import timezone
+from concurrent.futures import ThreadPoolExecutor
 
 from executor.UseCaseExecutor import test_interfaces, assert_func, requests_func, dispose_params, instantiation_time
 from executor.mqtt_publish_client import MQTTPublishClient
@@ -97,6 +98,16 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
         value = str(global_params_dict[key])
         if value.find('${') != -1:
             global_params_dict[key] = udf_dispose(value, case_log)
+    # mqtt订阅步骤前置
+    mqtt_sub_steps = case_steps.filter(type=11)
+    pool = ThreadPoolExecutor(max_workers=len(mqtt_sub_steps))
+    task_list = []
+    for mqtt_sub_step in mqtt_sub_steps:
+        mqtt = mqtt_sub_step.mqtt
+        mqtt = MQTTPublishClient(mqtt.broker, mqtt.port, mqtt.username, mqtt.password)
+        task = pool.submit(mqtt.sub_msg, mqtt_sub_step.topic, mqtt_sub_step.qos)
+        task_list.append(task)
+    # 步骤开始执行
     for case_step in case_steps:
         start_time = timezone.now()
         failed_case_steps = CaseStepLog.objects.filter(case_log=case_log, execute_status=0)
@@ -140,6 +151,10 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                 method = '查询'
             elif case_step.type in [5, 9]:
                 method = '执行'
+            elif case_step.type in [10, 12]:
+                method = '推送'
+            elif case_step.type == 11:
+                method = '订阅'
             else:
                 method = '-'
             case_step_log = CaseStepLog.objects.create(request_url='-', method=method,
@@ -203,6 +218,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                    use_case_callback_params_dict, suite_global_params, global_params_dict,
                                    interface_callback_params, response_body, response_code, start_time,
                                    case_log, case_step_log)
+        # 类型为等待时间
         elif case_step.type == 1:
             wait_time = json.loads(case_step.body)['time']
             time.sleep(wait_time)
@@ -262,6 +278,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                                            case_log=case_log, case_step=case_step,
                                                            execute_status=execute_status,
                                                            step_body=json.dumps(body), assert_result=[])
+        # 步骤为sql执行
         elif case_step.type in [4, 5, 6]:
             if case_step.type in [4, 6]:
                 method = '查询'
@@ -336,6 +353,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                        use_case_callback_params_dict, suite_global_params, global_params_dict,
                                        callback_params, result_data, response_code, start_time,
                                        case_log, case_step_log)
+        # 步骤为sql列表循环
         elif case_step.type in [8, 9]:
             if case_step.type == 8:
                 method = '查询'
@@ -438,6 +456,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                                                        step_body=json.dumps(body), assert_result=[])
                         # 关闭数据库链接（很关键）
                         cur.connection.close()
+        # 步骤为MQTT推送
         elif case_step.type == 10:
             method = '推送'
             mqtt = case_step.mqtt
@@ -475,7 +494,7 @@ def async_execute_use_case(use_case_id, taskLog_id, environment_id, suite_global
                                    use_case_callback_params_dict, suite_global_params, global_params_dict,
                                    callback_params, step_body, response_code, start_time,
                                    case_log, case_step_log)
-
+        # 步骤为MQTT推送列表循环
         elif case_step.type == 12:
             method = '推送'
             mqtt = case_step.mqtt

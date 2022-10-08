@@ -57,6 +57,6 @@ if __name__ == '__main__':
     msg = json.dumps({"msg": "hello"})
     print(mqtt.publish_msg(topic, msg, 0))
     print(mqtt.publish_msg(topic2, msg, 0))
-    # print(mqtt.publish_msg(topic3, 'msg1', 0))
+    print(mqtt.publish_msg(topic3, 'msg1', 0))
     # pool.shutdown(wait=False)
     # print(wait(task_list, timeout=2.5))
